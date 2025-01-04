@@ -1,0 +1,432 @@
+package com.nettleweb.ytproxy;
+
+import com.nettleweb.client.Console;
+import com.sun.net.httpserver.*;
+import org.schabi.newpipe.extractor.*;
+import org.schabi.newpipe.extractor.kiosk.*;
+import org.schabi.newpipe.extractor.linkhandler.*;
+import org.schabi.newpipe.extractor.search.*;
+import org.schabi.newpipe.extractor.services.youtube.linkHandler.*;
+import org.schabi.newpipe.extractor.stream.*;
+
+import java.io.*;
+import java.net.*;
+import java.nio.charset.*;
+import java.util.*;
+
+final class HTTPHandlerImpl implements HttpHandler {
+	@Override
+	public void handle(HttpExchange exchange) throws IOException {
+		String method = exchange.getRequestMethod();
+		switch (method) {
+			case "GET":
+			case "HEAD":
+				break;
+			case "OPTIONS":
+				sendResponse(exchange, 200, new String[]{
+						"Allow=GET, HEAD, OPTIONS"
+				}, null);
+				return;
+			default:
+				sendResponse(exchange, 405, new String[]{
+						"Allow=GET, HEAD, OPTIONS",
+						"Content-Type=text/plain"
+				}, Res.msg405);
+				return;
+		}
+
+		URI uri = exchange.getRequestURI();
+		switch (uri.getRawPath()) {
+			case "/search" -> {
+				Map<String, String> params = getSearchParams(uri.getRawQuery());
+				String filter = params.get("f");
+				String query = params.get("q");
+				String page = params.get("p");
+				String sort = params.get("s");
+
+				if (query == null || query.isEmpty()) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
+				try {
+					SearchQueryHandler handler = YoutubeSearchQueryHandlerFactory.getInstance().fromQuery(query,
+							(filter == null || filter.isEmpty()) ? List.of("videos") :
+									List.of(filter.split(",")), (sort == null || sort.isEmpty()) ?
+									"relevance" : sort);
+
+					StringBuilder str = new StringBuilder("{");
+					if (page == null || page.isEmpty()) {
+						SearchInfo info = SearchInfo.getInfo(ServiceList.YouTube, handler);
+
+						// basic info
+						str.append("\"id\":").append(encodeJSON(info.getId()));
+						str.append(",\"url\":").append(encodeJSON(info.getUrl()));
+						str.append(",\"name\":").append(encodeJSON(info.getName()));
+						str.append(",\"sort\":").append(encodeJSON(info.getSortFilter()));
+						str.append(",\"query\":").append(encodeJSON(info.getSearchString()));
+						str.append(",\"corrected\":").append(info.isCorrectedSearch());
+						str.append(",\"suggestion\":").append(encodeJSON(info.getSearchSuggestion()));
+
+						// next page
+						str.append(",\"nextPageToken\":");
+						if (info.hasNextPage())
+							str.append(encodeJSON(encodePage(info.getNextPage())));
+						else
+							str.append("null");
+
+						// items
+						encodeItems(str, info.getRelatedItems());
+					} else {
+						Page p = decodePage(page);
+						if (p == null) {
+							sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+							return;
+						}
+
+						ListExtractor.InfoItemsPage<InfoItem> info = SearchInfo.getMoreItems(ServiceList.YouTube,
+								handler, p);
+
+						// next page
+						str.append("\"nextPageToken\":");
+						if (info.hasNextPage())
+							str.append(encodeJSON(encodePage(info.getNextPage())));
+						else
+							str.append("null");
+
+						// items
+						encodeItems(str, info.getItems());
+					}
+
+					byte[] data = str.append("}").toString().getBytes(StandardCharsets.UTF_8);
+					sendResponse(exchange, 200, new String[]{
+							"Content-Type=application/json",
+							"Content-Length=" + data.length
+					}, data);
+				} catch (Exception e) {
+					Console.error("Failed to parse search info: ", e);
+					sendResponse(exchange, 500, new String[]{"Content-Type=text/plain"}, Res.msg500);
+				}
+			}
+			case "/stream" -> {
+				String url = getSearchParams(uri.getRawQuery()).get("u");
+				if (url == null || url.isEmpty()) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
+				try {
+					StreamInfo info = StreamInfo.getInfo(ServiceList.YouTube, url);
+					StringBuilder str = new StringBuilder("{");
+
+					// basic info
+					str.append("\"id\":").append(encodeJSON(info.getId()));
+					str.append(",\"url\":").append(encodeJSON(info.getUrl()));
+					str.append(",\"name\":").append(encodeJSON(info.getName()));
+					str.append(",\"host\":").append(encodeJSON(info.getHost()));
+					str.append(",\"short\":").append(info.isShortFormContent());
+					str.append(",\"license\":").append(encodeJSON(info.getLicence()));
+					str.append(",\"category\":").append(encodeJSON(info.getCategory()));
+					str.append(",\"duration\":").append(info.getDuration());
+					str.append(",\"ageLimit\":").append(info.getAgeLimit());
+					str.append(",\"viewCount\":").append(info.getViewCount());
+					str.append(",\"likeCount\":").append(info.getLikeCount());
+					str.append(",\"uploadDate\":").append(encodeJSON(info.getTextualUploadDate()));
+
+					// tags
+					str.append(",\"tags\":[ ");
+					for (String tag : info.getTags())
+						str.append(encodeJSON(tag)).append(",");
+					str.deleteCharAt(str.length() - 1).append("]");
+
+					// stream
+					str.append(",\"stream\":").append(switch (info.getStreamType()) {
+						case NONE -> "\"none\"";
+						case LIVE_STREAM -> "\"live\"";
+						case AUDIO_STREAM -> "\"audio\"";
+						case VIDEO_STREAM -> "\"video\"";
+						case POST_LIVE_STREAM -> "\"post_live\"";
+						case AUDIO_LIVE_STREAM -> "\"audio_live\"";
+						case POST_LIVE_AUDIO_STREAM -> "\"post_live_audio\"";
+					});
+
+					// privacy
+					str.append(",\"privacy\":").append(switch (info.getPrivacy()) {
+						case OTHER -> "\"other\"";
+						case PUBLIC -> "\"public\"";
+						case PRIVATE -> "\"private\"";
+						case INTERNAL -> "\"internal\"";
+						case UNLISTED -> "\"unlisted\"";
+					});
+
+					// uploader
+					str.append(",\"uploader\":{\"url\":").append(encodeJSON(info.getUploaderUrl()))
+							.append(",\"name\":").append(encodeJSON(info.getUploaderName()))
+							.append(",\"verified\":").append(info.isUploaderVerified())
+							.append(",\"subscribers\":").append(info.getUploaderSubscriberCount())
+							.append("}");
+
+					// subchannel
+					str.append(",\"subchannel\":{\"url\":").append(encodeJSON(info.getSubChannelUrl()))
+							.append(",\"name\":").append(encodeJSON(info.getSubChannelName()))
+							.append("}");
+
+					// thumbnails
+					str.append(",\"thumbnails\":");
+					encodeImages(str, info.getThumbnails());
+
+					// description
+					Description desc = info.getDescription();
+					if (desc != null)
+						str.append(",\"description\":").append(encodeJSON(desc.getContent()));
+
+					// audio streams
+					str.append(",\"audioStreams\":[ ");
+					for (AudioStream stream : info.getAudioStreams()) {
+						str.append("{\"id\":").append(encodeJSON(stream.getId()))
+								.append(",\"url\":").append(encodeJSON(stream.getContent()))
+								.append(",\"codec\":").append(encodeJSON(stream.getCodec()))
+								.append(",\"quality\":").append(encodeJSON(stream.getQuality()))
+								.append(",\"bitrate\":").append(stream.getBitrate())
+								.append("},");
+					}
+					str.deleteCharAt(str.length() - 1).append("]");
+
+					// video streams
+					str.append(",\"videoStreams\":[ ");
+					for (VideoStream stream : info.getVideoStreams()) {
+						str.append("{\"id\":").append(encodeJSON(stream.getId()))
+								.append(",\"url\":").append(encodeJSON(stream.getContent()))
+								.append(",\"fps\":").append(stream.getFps())
+								.append(",\"codec\":").append(encodeJSON(stream.getCodec()))
+								.append(",\"width\":").append(stream.getWidth())
+								.append(",\"height\":").append(stream.getHeight())
+								.append(",\"bitrate\":").append(stream.getBitrate())
+								.append(",\"quality\":").append(encodeJSON(stream.getQuality()))
+								.append("},");
+					}
+					str.deleteCharAt(str.length() - 1).append("]");
+
+					// related items
+					str.append(",\"relatedItems\":[ ");
+					for (InfoItem item : info.getRelatedItems()) {
+						if (item instanceof StreamInfoItem)
+							encodeStreamInfoItem(str, (StreamInfoItem) item);
+						else
+							encodeInfoItem(str, item);
+					}
+					str.deleteCharAt(str.length() - 1).append("]");
+
+					byte[] data = str.append("}").toString().getBytes(StandardCharsets.UTF_8);
+					sendResponse(exchange, 200, new String[]{
+							"Content-Type=application/json",
+							"Content-Length=" + data.length
+					}, data);
+				} catch (Exception e) {
+					Console.error("Failed to parse video stream info: ", e);
+					sendResponse(exchange, 500, new String[]{"Content-Type=text/plain"}, Res.msg500);
+				}
+			}
+			case "/trending" -> {
+				try {
+					KioskInfo info = KioskInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/feed/trending");
+					StringBuilder str = new StringBuilder("{");
+
+					// basic info
+					str.append("\"id\":").append(encodeJSON(info.getId()));
+					str.append(",\"url\":").append(encodeJSON(info.getUrl()));
+					str.append(",\"name\":").append(encodeJSON(info.getName()));
+					str.append(",\"sort\":").append(encodeJSON(info.getSortFilter()));
+
+					// items
+					encodeItems(str, info.getRelatedItems());
+
+					byte[] data = str.append("}").toString().getBytes(StandardCharsets.UTF_8);
+					sendResponse(exchange, 200, new String[]{
+							"Content-Type=application/json",
+							"Content-Length=" + data.length
+					}, data);
+				} catch (Exception e) {
+					Console.error("Failed to parse trending info: ", e);
+					sendResponse(exchange, 500, new String[]{"Content-Type=text/plain"}, Res.msg500);
+				}
+			}
+			case "/robots.txt" -> sendResponse(exchange, 200, new String[]{"Content-Type=text/plain"}, Res.robots_txt);
+			case "/favicon.ico" ->
+					sendResponse(exchange, 200, new String[]{"Content-Type=image/x-icon"}, Res.favicon_ico);
+			default -> sendResponse(exchange, 404, new String[]{"Content-Type=text/plain"}, Res.msg404);
+		}
+	}
+
+	private static String encodeJSON(String str) {
+		if (str == null)
+			return "null";
+
+		StringBuilder builder = new StringBuilder("\"");
+		for (char ch : str.toCharArray()) {
+			switch (ch) {
+				case '\"':
+					builder.append("\\\"");
+					break;
+				case '\\':
+					builder.append("\\\\");
+					break;
+				case '\b':
+					builder.append("\\b");
+					break;
+				case '\f':
+					builder.append("\\f");
+					break;
+				case '\n':
+					builder.append("\\n");
+					break;
+				case '\r':
+					builder.append("\\r");
+					break;
+				case '\t':
+					builder.append("\\t");
+					break;
+				default:
+					if (ch < 0x20) {
+						String code = Integer.toString(ch, 16);
+						code = switch (code.length()) {
+							case 0 -> "0000";
+							case 1 -> "000" + code;
+							case 2 -> "00" + code;
+							case 3 -> "0" + code;
+							default -> code;
+						};
+						builder.append("\\u").append(code);
+					} else builder.append(ch);
+					break;
+			}
+		}
+
+		return builder.append("\"").toString();
+	}
+
+	private static String encodePage(Page page) {
+		try (ByteArrayOutputStream str1 = new ByteArrayOutputStream(); ObjectOutputStream str2 =
+				new ObjectOutputStream(str1)) {
+
+			str2.writeObject(page);
+			str2.flush();
+			return Base64.getEncoder().encodeToString(str1.toByteArray());
+		} catch (Exception e) {
+			throw new RuntimeException("Failed to serialize page object", e);
+		}
+	}
+
+	private static Page decodePage(String data) {
+		try (ByteArrayInputStream str1 = new ByteArrayInputStream(Base64.getDecoder().decode(data)); ObjectInputStream str2 = new ObjectInputStream(str1)) {
+			return (Page) str2.readObject();
+		} catch (Exception e) {
+			Console.error("Failed to decode page object: ", e);
+			return null; // be more flexible while decoding
+		}
+	}
+
+	private static void encodeItems(StringBuilder str, Iterable<? extends InfoItem> items) {
+		str.append(",\"results\":[ ");
+		for (InfoItem item : items) {
+			if (item instanceof StreamInfoItem)
+				encodeStreamInfoItem(str, (StreamInfoItem) item);
+			else
+				encodeInfoItem(str, item);
+		}
+		str.deleteCharAt(str.length() - 1).append("]");
+	}
+
+	private static void encodeImages(StringBuilder str, Iterable<Image> images) {
+		str.append("[ ");
+		for (Image image : images) {
+			str.append("{\"url\":").append(encodeJSON(image.getUrl()))
+					.append(",\"width\":").append(image.getWidth())
+					.append(",\"height\":").append(image.getHeight())
+					.append("},");
+		}
+		str.deleteCharAt(str.length() - 1).append("]");
+	}
+
+	private static void encodeInfoItem(StringBuilder str, InfoItem item) {
+		str.append("{\"url\":").append(encodeJSON(item.getUrl()))
+				.append(",\"name\":").append(encodeJSON(item.getName()))
+				.append(",\"type\":").append(switch (item.getInfoType()) {
+					case STREAM -> "\"stream\"";
+					case CHANNEL -> "\"channel\"";
+					case COMMENT -> "\"comment\"";
+					case PLAYLIST -> "\"playlist\"";
+				})
+				.append(",\"thumbnails\":");
+
+		encodeImages(str, item.getThumbnails());
+		str.append("},");
+	}
+
+	private static void encodeStreamInfoItem(StringBuilder str, StreamInfoItem item) {
+		str.append("{\"url\":").append(encodeJSON(item.getUrl()))
+				.append(",\"name\":").append(encodeJSON(item.getName()))
+				.append(",\"type\":").append("\"stream\"")
+				.append(",\"short\":").append(item.isShortFormContent())
+				.append(",\"stream\":").append(switch (item.getStreamType()) {
+					case NONE -> "\"none\"";
+					case LIVE_STREAM -> "\"live\"";
+					case AUDIO_STREAM -> "\"audio\"";
+					case VIDEO_STREAM -> "\"video\"";
+					case POST_LIVE_STREAM -> "\"post_live\"";
+					case AUDIO_LIVE_STREAM -> "\"audio_live\"";
+					case POST_LIVE_AUDIO_STREAM -> "\"post_live_audio\"";
+				})
+				.append(",\"duration\":").append(item.getDuration())
+				.append(",\"viewCount\":").append(item.getViewCount())
+				.append(",\"uploadDate\":").append(encodeJSON(item.getTextualUploadDate()))
+				.append(",\"description\":").append(encodeJSON(item.getShortDescription()));
+
+		str.append(",\"uploader\":{\"url\":").append(encodeJSON(item.getUploaderUrl()))
+				.append(",\"name\":").append(encodeJSON(item.getUploaderName()))
+				.append("},\"thumbnails\":");
+
+		encodeImages(str, item.getThumbnails());
+		str.append("},");
+	}
+
+	private static void sendResponse(HttpExchange exchange, int status, String[] headers, byte[] data) throws IOException {
+		Map<String, List<String>> resHeaders = exchange.getResponseHeaders();
+		for (String header : headers) {
+			int i = header.indexOf('=', 1);
+			if (i <= 0)
+				throw new IOException("Invalid header entry: " + header);
+
+			resHeaders.put(header.substring(0, i), List.of(header.substring(i + 1)));
+		}
+
+		int dataLength = data == null ? 0 : data.length;
+		exchange.sendResponseHeaders(status, dataLength);
+
+		if (dataLength > 0 && !exchange.getRequestMethod().equals("HEAD")) {
+			try (OutputStream out = exchange.getResponseBody()) {
+				out.write(data, 0, dataLength);
+				out.flush();
+			}
+		}
+
+		exchange.close();
+	}
+
+	private static Map<String, String> getSearchParams(String query) {
+		Map<String, String> params = new HashMap<>();
+		if (query == null)
+			return params;
+
+		for (String part : query.split("&")) {
+			int i = part.indexOf("=", 1);
+			if (i >= 0)
+				params.put(URLDecoder.decode(part.substring(0, i), StandardCharsets.UTF_8),
+						URLDecoder.decode(part.substring(i + 1), StandardCharsets.UTF_8));
+			else
+				params.put(URLDecoder.decode(part, StandardCharsets.UTF_8), "");
+		}
+
+		return params;
+	}
+}

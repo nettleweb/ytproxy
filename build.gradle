@@ -1,0 +1,57 @@
+plugins {
+	id 'java'
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+group = "com.example"
+version = "0.1.0"
+
+jar {
+	manifest {
+		attributes('Main-Class': 'com.nettleweb.ytproxy.Main')
+	}
+
+	from {
+		configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+	} {
+		exclude "META-INF/*.SF"
+		exclude "META-INF/*.DSA"
+		exclude "META-INF/*.RSA"
+	}
+}
+
+sourceSets {
+	main {
+		java {
+			srcDir "src/java"
+		}
+
+		resources {
+			srcDir "src/res"
+		}
+	}
+}
+
+compileJava {
+	options.encoding = "utf-8"
+	options.debug = false
+	options.verbose = false
+	options.warnings = true
+	options.deprecation = true
+	options.failOnError = false
+}
+
+repositories {
+	google()
+	maven { url "https://jitpack.io" }
+	maven { url "https://maven.fabric.io/public" }
+	mavenCentral()
+}
+
+dependencies {
+	implementation "com.github.TeamNewPipe.NewPipeExtractor:NewPipeExtractor:v0.24.3"
+}
