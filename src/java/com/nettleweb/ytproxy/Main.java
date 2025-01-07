@@ -8,8 +8,11 @@ import org.schabi.newpipe.extractor.localization.*;
 
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 public final class Main {
+	private static final ExecutorService defaultExecutor = Executors.newFixedThreadPool(4);
+
 	static {
 		try {
 			System.loadLibrary("nettleweb");
@@ -99,6 +102,7 @@ public final class Main {
 
 		HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 255);
 		server.createContext("/", new HTTPHandlerImpl());
+		server.setExecutor(defaultExecutor);
 		server.start();
 	}
 }
