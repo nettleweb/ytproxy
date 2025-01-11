@@ -1,8 +1,11 @@
 package com.nettleweb.client;
 
+import com.nettleweb.runtime.*;
+
 import java.io.*;
 import java.lang.reflect.*;
 
+@RequiresNative
 public final class VM {
 	private VM() {}
 
@@ -25,8 +28,13 @@ public final class VM {
 	public static final int FD_STDOUT = 1;
 	public static final int FD_STDERR = 2;
 
+	@RequiresNative
 	public static final InputStream stdin = new Stdin();
+
+	@RequiresNative
 	public static final OutputStream stdout = new Stdout();
+
+	@RequiresNative
 	public static final OutputStream stderr = new Stderr();
 
 	public static native void exit(int code);
@@ -43,6 +51,7 @@ public final class VM {
 
 	public static native int system(String cmd);
 
+	@RequiresNative
 	public static final class Memory {
 		private Memory() {}
 
@@ -57,6 +66,7 @@ public final class VM {
 		public static native void free(long ptr);
 	}
 
+	@RequiresNative
 	public static final class Reflect {
 		private Reflect() {}
 

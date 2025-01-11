@@ -6,7 +6,6 @@ import org.schabi.newpipe.extractor.*;
 import org.schabi.newpipe.extractor.kiosk.*;
 import org.schabi.newpipe.extractor.linkhandler.*;
 import org.schabi.newpipe.extractor.search.*;
-import org.schabi.newpipe.extractor.services.youtube.linkHandler.*;
 import org.schabi.newpipe.extractor.stream.*;
 
 import java.io.*;
@@ -39,6 +38,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 		switch (uri.getRawPath()) {
 			case "/search" -> {
 				Map<String, String> params = getSearchParams(uri.getRawQuery());
+				String platform = params.get("t");
 				String filter = params.get("f");
 				String query = params.get("q");
 				String page = params.get("p");
@@ -49,15 +49,20 @@ final class HTTPHandlerImpl implements HttpHandler {
 					return;
 				}
 
+				StreamingService service = getServiceById(platform);
+				if (service == null) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
 				try {
-					SearchQueryHandler handler = YoutubeSearchQueryHandlerFactory.getInstance().fromQuery(query,
-							(filter == null || filter.isEmpty()) ? List.of("videos") :
-									List.of(filter.split(",")), (sort == null || sort.isEmpty()) ?
-									"relevance" : sort);
+					SearchQueryHandler handler = service.getSearchQHFactory().fromQuery(query,
+							(filter == null || filter.isEmpty()) ? List.of("videos") : List.of(filter.split(",")),
+							(sort == null || sort.isEmpty()) ? "relevance" : sort);
 
 					StringBuilder str = new StringBuilder("{");
 					if (page == null || page.isEmpty()) {
-						SearchInfo info = SearchInfo.getInfo(ServiceList.YouTube, handler);
+						SearchInfo info = SearchInfo.getInfo(service, handler);
 
 						// basic info
 						str.append("\"id\":").append(encodeJSON(info.getId()));
@@ -65,6 +70,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 						str.append(",\"name\":").append(encodeJSON(info.getName()));
 						str.append(",\"sort\":").append(encodeJSON(info.getSortFilter()));
 						str.append(",\"query\":").append(encodeJSON(info.getSearchString()));
+						str.append(",\"service\":").append(info.getServiceId());
 						str.append(",\"corrected\":").append(info.isCorrectedSearch());
 						str.append(",\"suggestion\":").append(encodeJSON(info.getSearchSuggestion()));
 
@@ -84,8 +90,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 							return;
 						}
 
-						ListExtractor.InfoItemsPage<InfoItem> info = SearchInfo.getMoreItems(ServiceList.YouTube,
-								handler, p);
+						ListExtractor.InfoItemsPage<InfoItem> info = SearchInfo.getMoreItems(service, handler, p);
 
 						// next page
 						str.append("\"nextPageToken\":");
@@ -109,14 +114,23 @@ final class HTTPHandlerImpl implements HttpHandler {
 				}
 			}
 			case "/stream" -> {
-				String url = getSearchParams(uri.getRawQuery()).get("u");
+				Map<String, String> params = getSearchParams(uri.getRawQuery());
+				String svc = params.get("t");
+				String url = params.get("u");
+
 				if (url == null || url.isEmpty()) {
 					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
 					return;
 				}
 
+				StreamingService service = getServiceById(svc);
+				if (service == null) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
 				try {
-					StreamInfo info = StreamInfo.getInfo(ServiceList.YouTube, url);
+					StreamInfo info = StreamInfo.getInfo(service, url);
 					StringBuilder str = new StringBuilder("{");
 
 					// basic info
@@ -125,6 +139,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 					str.append(",\"name\":").append(encodeJSON(info.getName()));
 					str.append(",\"host\":").append(encodeJSON(info.getHost()));
 					str.append(",\"short\":").append(info.isShortFormContent());
+					str.append(",\"service\":").append(info.getServiceId());
 					str.append(",\"license\":").append(encodeJSON(info.getLicence()));
 					str.append(",\"category\":").append(encodeJSON(info.getCategory()));
 					str.append(",\"duration\":").append(info.getDuration());
@@ -228,8 +243,17 @@ final class HTTPHandlerImpl implements HttpHandler {
 				}
 			}
 			case "/trending" -> {
+				StreamingService service = getServiceById(getSearchParams(uri.getRawQuery()).get("t"));
+				if (service == null) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
 				try {
-					KioskInfo info = KioskInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/feed/trending");
+					KioskExtractor<?> extractor = service.getKioskList().getDefaultKioskExtractor();
+					extractor.fetchPage();
+
+					KioskInfo info = KioskInfo.getInfo(extractor);
 					StringBuilder str = new StringBuilder("{");
 
 					// basic info
@@ -237,6 +261,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 					str.append(",\"url\":").append(encodeJSON(info.getUrl()));
 					str.append(",\"name\":").append(encodeJSON(info.getName()));
 					str.append(",\"sort\":").append(encodeJSON(info.getSortFilter()));
+					str.append(",\"service\":").append(info.getServiceId());
 
 					// items
 					encodeItems(str, info.getRelatedItems());
@@ -413,9 +438,20 @@ final class HTTPHandlerImpl implements HttpHandler {
 		exchange.close();
 	}
 
+	private static StreamingService getServiceById(String id) {
+		if (id == null || id.isEmpty())
+			return ServiceList.YouTube;
+
+		try {
+			return ServiceList.all().get(Integer.parseUnsignedInt(id, 10));
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
 	private static Map<String, String> getSearchParams(String query) {
 		Map<String, String> params = new HashMap<>();
-		if (query == null)
+		if (query == null || query.isEmpty())
 			return params;
 
 		for (String part : query.split("&")) {

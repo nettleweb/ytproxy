@@ -36,9 +36,10 @@ final class DownloaderImpl extends Downloader {
 	public Response execute(Request request) throws IOException {
 		HttpURLConnection connection = (HttpURLConnection) new URL(request.url()).openConnection(this.proxy);
 		connection.setDoOutput(true);
-		connection.setUseCaches(true);
+		connection.setUseCaches(false);
 		connection.setRequestMethod(request.httpMethod());
 		connection.setConnectTimeout(10000);
+		connection.setInstanceFollowRedirects(true);
 
 		for (Map.Entry<String, List<String>> e : request.headers().entrySet()) {
 			String key = e.getKey();
