@@ -11,7 +11,8 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public final class Main {
-	private static final ExecutorService defaultExecutor = Executors.newFixedThreadPool(4);
+	private static final ExecutorService defaultExecutor = Executors.newFixedThreadPool(6,
+			DefaultThreadFactory.instance);
 
 	static {
 		try {
@@ -101,7 +102,7 @@ public final class Main {
 		}
 
 		HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 255);
-		server.createContext("/", new HTTPHandlerImpl());
+		server.createContext("/", HTTPHandlerImpl.instance);
 		server.setExecutor(defaultExecutor);
 		server.start();
 	}

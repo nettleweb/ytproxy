@@ -1,7 +1,9 @@
 package com.nettleweb.ytproxy;
 
 import com.nettleweb.client.Console;
+import org.jetbrains.annotations.*;
 import org.schabi.newpipe.extractor.downloader.*;
+import org.schabi.newpipe.extractor.localization.*;
 
 import java.io.*;
 import java.net.*;
@@ -11,7 +13,7 @@ import java.util.*;
 final class DownloaderImpl extends Downloader {
 	private final Proxy proxy;
 
-	DownloaderImpl(String proxy) {
+	DownloaderImpl(@Nullable String proxy) {
 		Proxy p = Proxy.NO_PROXY;
 
 		if (proxy != null && !proxy.isEmpty()) {
@@ -33,21 +35,115 @@ final class DownloaderImpl extends Downloader {
 	}
 
 	@Override
-	public Response execute(Request request) throws IOException {
-		HttpURLConnection connection = (HttpURLConnection) new URL(request.url()).openConnection(this.proxy);
+	public Response get(@NotNull String url) throws IOException {
+		return sendRequest(url, "GET", null, null);
+	}
+
+	@Override
+	public Response get(@NotNull String url, @Nullable Localization _unused) throws IOException {
+		return sendRequest(url, "GET", null, null);
+	}
+
+	@Override
+	public Response get(@NotNull String url, @Nullable Map<String, List<String>> headers) throws IOException {
+		return sendRequest(url, "GET", headers, null);
+	}
+
+	@Override
+	public Response get(@NotNull String url, @Nullable Map<String, List<String>> headers,
+	                    @Nullable Localization _unused) throws IOException {
+		return sendRequest(url, "GET", headers, null);
+	}
+
+	@Override
+	public Response head(@NotNull String url) throws IOException {
+		return sendRequest(url, "HEAD", null, null);
+	}
+
+	@Override
+	public Response head(@NotNull String url, @Nullable Map<String, List<String>> headers) throws IOException {
+		return sendRequest(url, "HEAD", headers, null);
+	}
+
+	@Override
+	public Response post(@NotNull String url, @Nullable Map<String, List<String>> headers,
+	                     @Nullable byte[] dataToSend) throws IOException {
+		return sendRequest(url, "POST", headers, dataToSend);
+	}
+
+	@Override
+	public Response post(@NotNull String url, @Nullable Map<String, List<String>> headers, @Nullable byte[] dataToSend,
+	                     @Nullable Localization _unused) throws IOException {
+		return sendRequest(url, "POST", headers, dataToSend);
+	}
+
+	@Override
+	public Response postWithContentType(@NotNull String url, @Nullable Map<String, List<String>> headers,
+	                                    @Nullable byte[] dataToSend, @Nullable String contentType) throws IOException {
+		if (headers != null && contentType != null) {
+			headers = new HashMap<>(headers);
+			headers.put("Content-Type", List.of(contentType));
+		}
+		return sendRequest(url, "POST", headers, dataToSend);
+	}
+
+	@Override
+	public Response postWithContentType(@NotNull String url, @Nullable Map<String, List<String>> headers,
+	                                    @Nullable byte[] dataToSend, @Nullable Localization _unused,
+	                                    @Nullable String contentType) throws IOException {
+		if (headers != null && contentType != null) {
+			headers = new HashMap<>(headers);
+			headers.put("Content-Type", List.of(contentType));
+		}
+		return sendRequest(url, "POST", headers, dataToSend);
+	}
+
+	@Override
+	public Response postWithContentTypeJson(@NotNull String url, @Nullable Map<String, List<String>> headers,
+	                                        @Nullable byte[] dataToSend) throws IOException {
+		if (headers != null) {
+			headers = new HashMap<>(headers);
+			headers.put("Content-Type", List.of("application/json"));
+		}
+		return sendRequest(url, "POST", headers, dataToSend);
+	}
+
+	@Override
+	public Response postWithContentTypeJson(String url, Map<String, List<String>> headers, byte[] dataToSend, Localization localization) throws IOException {
+		if (headers != null) {
+			headers = new HashMap<>(headers);
+			headers.put("Content-Type", List.of("application/json"));
+		}
+		return sendRequest(url, "POST", headers, dataToSend);
+	}
+
+	@Override
+	public Response execute(@NotNull Request request) throws IOException {
+		return sendRequest(request.url(), request.httpMethod(), request.headers(), request.dataToSend());
+	}
+
+	@NotNull
+	private synchronized Response sendRequest(@NotNull String url, @NotNull String method,
+	                                          @Nullable Map<String, List<String>> headers,
+	                                          @Nullable byte[] data) throws IOException {
+		HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection(this.proxy);
 		connection.setDoOutput(true);
 		connection.setUseCaches(false);
-		connection.setRequestMethod(request.httpMethod());
+		connection.setRequestMethod(method);
 		connection.setConnectTimeout(10000);
 		connection.setInstanceFollowRedirects(true);
 
-		for (Map.Entry<String, List<String>> e : request.headers().entrySet()) {
-			String key = e.getKey();
-			for (String v : e.getValue())
-				connection.addRequestProperty(key, v);
+		if (headers != null) {
+			for (Map.Entry<String, List<String>> e : headers.entrySet()) {
+				String key = e.getKey();
+				for (String v : e.getValue())
+					connection.addRequestProperty(key, v);
+			}
 		}
 
-		byte[] data = request.dataToSend();
+		connection.setRequestProperty("DNT", "1");
+		connection.setRequestProperty("Sec-GPC", "1");
+
 		if (data != null) {
 			OutputStream out = connection.getOutputStream();
 			out.write(data, 0, data.length);

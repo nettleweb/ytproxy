@@ -14,6 +14,10 @@ import java.nio.charset.*;
 import java.util.*;
 
 final class HTTPHandlerImpl implements HttpHandler {
+	public static final HTTPHandlerImpl instance = new HTTPHandlerImpl();
+
+	private HTTPHandlerImpl() {}
+
 	@Override
 	public void handle(HttpExchange exchange) throws IOException {
 		String method = exchange.getRequestMethod();

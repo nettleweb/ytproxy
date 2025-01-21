@@ -1,5 +1,5 @@
 plugins {
-	id 'java'
+	id "java"
 }
 
 java {
@@ -53,5 +53,6 @@ repositories {
 }
 
 dependencies {
+	compileOnly "org.jetbrains:annotations:13.0"
 	implementation "com.github.TeamNewPipe.NewPipeExtractor:NewPipeExtractor:v0.24.3"
 }
