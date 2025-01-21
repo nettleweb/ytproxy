@@ -11,7 +11,7 @@ final class DefaultThreadFactory implements ThreadFactory {
 	public Thread newThread(Runnable r) {
 		Thread thread = new Thread(r, "Worker");
 		thread.setPriority(Thread.MAX_PRIORITY);
-		thread.setDaemon(true);
+		thread.setDaemon(false);
 		return thread;
 	}
 }

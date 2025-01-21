@@ -123,12 +123,14 @@ final class DownloaderImpl extends Downloader {
 	}
 
 	@NotNull
-	private synchronized Response sendRequest(@NotNull String url, @NotNull String method,
+	private Response sendRequest(@NotNull String url, @NotNull String method,
 	                                          @Nullable Map<String, List<String>> headers,
 	                                          @Nullable byte[] data) throws IOException {
 		HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection(this.proxy);
+		connection.setDoInput(true);
 		connection.setDoOutput(true);
 		connection.setUseCaches(false);
+		connection.setReadTimeout(10000);
 		connection.setRequestMethod(method);
 		connection.setConnectTimeout(10000);
 		connection.setInstanceFollowRedirects(true);
@@ -140,9 +142,6 @@ final class DownloaderImpl extends Downloader {
 					connection.addRequestProperty(key, v);
 			}
 		}
-
-		connection.setRequestProperty("DNT", "1");
-		connection.setRequestProperty("Sec-GPC", "1");
 
 		if (data != null) {
 			OutputStream out = connection.getOutputStream();

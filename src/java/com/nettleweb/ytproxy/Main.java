@@ -3,6 +3,7 @@ package com.nettleweb.ytproxy;
 import com.nettleweb.client.*;
 import com.sun.net.httpserver.*;
 import org.schabi.newpipe.extractor.*;
+import org.schabi.newpipe.extractor.downloader.*;
 import org.schabi.newpipe.extractor.kiosk.*;
 import org.schabi.newpipe.extractor.localization.*;
 
@@ -32,7 +33,7 @@ public final class Main {
 		String proxy = null;
 
 		for (String arg : args) {
-			if (arg.charAt(0) == '-') {
+			if (arg.length() > 1 && arg.charAt(0) == '-') {
 				arg = arg.charAt(1) == '-' ? arg.substring(2) : arg.substring(1);
 				switch (arg) {
 					case "host" -> parse = 1;
@@ -89,9 +90,23 @@ public final class Main {
 			}
 		}
 
+		Console.log("Proxy: " + proxy);
 		Console.log("Use native: " + VM.useNative);
 		Console.log("Initializing...");
-		NewPipe.init(new DownloaderImpl(proxy), Localization.fromLocale(Locale.ROOT), new ContentCountry("US"));
+
+		{
+			Downloader downloader = new DownloaderImpl(proxy);
+
+			try {
+				String ip = downloader.get("https://ipinfo.io/ip").responseBody();
+				if (!ip.isEmpty())
+					Console.println("  Your public IP: " + ip);
+			} catch (Exception e) {
+				// ignore
+			}
+
+			NewPipe.init(downloader, Localization.fromLocale(Locale.ROOT), new ContentCountry("US"));
+		}
 
 		Console.log("Starting server...");
 		try {

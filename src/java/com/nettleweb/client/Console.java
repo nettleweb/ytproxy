@@ -1,5 +1,7 @@
 package com.nettleweb.client;
 
+import org.jetbrains.annotations.*;
+
 import java.io.*;
 import java.lang.annotation.*;
 import java.nio.charset.*;
@@ -76,7 +78,7 @@ public final class Console {
 		log(builder.substring(0, builder.length() - 1));
 	}
 
-	public static void log(String data) {
+	public static void log(@Nullable String data) {
 		((PrintStream) out).println("[CONSOLE LOG] " + dateFormat.format(new Date(System.currentTimeMillis())) + " " + data);
 	}
 
@@ -88,7 +90,7 @@ public final class Console {
 		warn(builder.substring(0, builder.length() - 1));
 	}
 
-	public static void warn(String data) {
+	public static void warn(@Nullable String data) {
 		((PrintStream) out).println("[CONSOLE WARN] " + dateFormat.format(new Date(System.currentTimeMillis())) + " " + data);
 	}
 
@@ -100,11 +102,11 @@ public final class Console {
 		error(builder.substring(0, builder.length() - 1));
 	}
 
-	public static void error(String data) {
+	public static void error(@Nullable String data) {
 		((PrintStream) err).println("[CONSOLE ERROR] " + dateFormat.format(new Date(System.currentTimeMillis())) + " " + data);
 	}
 
-	public static void println(String data) {
+	public static void println(@NotNull String data) {
 		try {
 			OutputStream out = Console.out;
 			out.write(data.getBytes(StandardCharsets.UTF_8));
@@ -115,7 +117,7 @@ public final class Console {
 		}
 	}
 
-	public static void printErr(String data) {
+	public static void printErr(@NotNull String data) {
 		try {
 			OutputStream err = Console.err;
 			err.write(data.getBytes(StandardCharsets.UTF_8));
@@ -143,12 +145,12 @@ public final class Console {
 		}
 
 		@Override
-		public int read(byte[] b) {
+		public int read(@NotNull byte[] b) {
 			return this.read(b, 0, b.length);
 		}
 
 		@Override
-		public int read(byte[] b, int off, int len) {
+		public int read(@NotNull byte[] b, int off, int len) {
 			try {
 				return this.base.read(b, off, len);
 			} catch (Exception e) {
@@ -181,12 +183,12 @@ public final class Console {
 		}
 
 		@Override
-		public void write(byte[] b) {
+		public void write(@NotNull byte[] b) {
 			this.write(b, 0, b.length);
 		}
 
 		@Override
-		public void write(byte[] b, int off, int len) {
+		public void write(@NotNull byte[] b, int off, int len) {
 			try {
 				OutputStream stream = this.base;
 				stream.write(b, off, len);
@@ -212,7 +214,7 @@ public final class Console {
 		}
 
 		@Override
-		public void print(char[] s) {
+		public void print(@NotNull char[] s) {
 			this.write(new String(s).getBytes(StandardCharsets.UTF_8));
 		}
 
@@ -228,7 +230,7 @@ public final class Console {
 		}
 
 		@Override
-		public void println(char[] x) {
+		public void println(@NotNull char[] x) {
 			this.write(new String(x).getBytes(StandardCharsets.UTF_8));
 			this.write(newLine);
 		}
@@ -311,7 +313,7 @@ public final class Console {
 		}
 
 		@Override
-		public PrintStream append(CharSequence s) {
+		public PrintStream append(@NotNull CharSequence s) {
 			this.print(getChars(s));
 			return this;
 		}

@@ -1,6 +1,7 @@
 package com.nettleweb.client;
 
 import com.nettleweb.runtime.*;
+import org.jetbrains.annotations.*;
 
 import java.io.*;
 import java.lang.reflect.*;
@@ -49,17 +50,17 @@ public final class VM {
 
 	public static native void debug();
 
-	public static native int system(String cmd);
+	public static native int system(@NotNull String cmd);
 
 	@RequiresNative
 	public static final class Memory {
 		private Memory() {}
 
-		public static native long objectPtr(Object obj);
+		public static native long objectPtr(@Nullable Object obj);
 
 		public static native byte[] getRaw(long ptr, int len);
 
-		public static native void setRaw(long ptr, byte[] buf);
+		public static native void setRaw(long ptr, @NotNull byte[] buf);
 
 		public static native long malloc(long size);
 
@@ -70,11 +71,12 @@ public final class VM {
 	public static final class Reflect {
 		private Reflect() {}
 
-		public static native Class<?> getClass(String name);
+		public static native Class<?> getClass(@NotNull String name);
 
-		public static native Object newObject(Class<?> cls);
+		@NotNull
+		public static native Object newObject(@NotNull Class<?> cls);
 
-		public static native void setAccessible(AccessibleObject obj, boolean flag);
+		public static native void setAccessible(@NotNull AccessibleObject obj, boolean flag);
 	}
 
 	private static final class Stdin extends InputStream {
@@ -88,7 +90,7 @@ public final class VM {
 		}
 
 		@Override
-		public native int read(byte[] buf, int off, int len);
+		public native int read(@NotNull byte[] buf, int off, int len);
 
 		@Override
 		public void close() {
@@ -107,7 +109,7 @@ public final class VM {
 		}
 
 		@Override
-		public native void write(byte[] buf, int off, int len);
+		public native void write(@NotNull byte[] buf, int off, int len);
 
 		@Override
 		public void flush() {
@@ -135,7 +137,7 @@ public final class VM {
 		}
 
 		@Override
-		public native void write(byte[] buf, int off, int len);
+		public native void write(@NotNull byte[] buf, int off, int len);
 
 		@Override
 		public void flush() {
@@ -161,12 +163,12 @@ public final class VM {
 		private final String command;
 		private final String message;
 
-		public ErrnoException(int errno, String cmd) {
+		public ErrnoException(int errno, @Nullable String cmd) {
 			this(errno, cmd, (cmd == null || cmd.isEmpty()) ? "Operation finished with error code: " + errno :
 					"Operation " + cmd + " finished with error code: " + errno);
 		}
 
-		private ErrnoException(int errno, String cmd, String msg) {
+		private ErrnoException(int errno, @Nullable String cmd, @Nullable String msg) {
 			super(msg);
 			this.errno = errno;
 			this.command = cmd;
