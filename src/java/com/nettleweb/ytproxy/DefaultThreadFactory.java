@@ -1,5 +1,7 @@
 package com.nettleweb.ytproxy;
 
+import org.jetbrains.annotations.*;
+
 import java.util.concurrent.*;
 
 final class DefaultThreadFactory implements ThreadFactory {
@@ -8,7 +10,7 @@ final class DefaultThreadFactory implements ThreadFactory {
 	private DefaultThreadFactory() {}
 
 	@Override
-	public Thread newThread(Runnable r) {
+	public Thread newThread(@NotNull Runnable r) {
 		Thread thread = new Thread(r, "Worker");
 		thread.setPriority(Thread.MAX_PRIORITY);
 		thread.setDaemon(false);

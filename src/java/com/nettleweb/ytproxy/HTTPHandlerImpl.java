@@ -2,9 +2,12 @@ package com.nettleweb.ytproxy;
 
 import com.nettleweb.client.Console;
 import com.sun.net.httpserver.*;
+import org.jetbrains.annotations.*;
 import org.schabi.newpipe.extractor.*;
+import org.schabi.newpipe.extractor.channel.*;
 import org.schabi.newpipe.extractor.kiosk.*;
 import org.schabi.newpipe.extractor.linkhandler.*;
+import org.schabi.newpipe.extractor.playlist.*;
 import org.schabi.newpipe.extractor.search.*;
 import org.schabi.newpipe.extractor.stream.*;
 
@@ -19,7 +22,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 	private HTTPHandlerImpl() {}
 
 	@Override
-	public void handle(HttpExchange exchange) throws IOException {
+	public void handle(@NotNull HttpExchange exchange) throws IOException {
 		String method = exchange.getRequestMethod();
 		switch (method) {
 			case "GET":
@@ -77,13 +80,8 @@ final class HTTPHandlerImpl implements HttpHandler {
 						str.append(",\"service\":").append(info.getServiceId());
 						str.append(",\"corrected\":").append(info.isCorrectedSearch());
 						str.append(",\"suggestion\":").append(encodeJSON(info.getSearchSuggestion()));
-
-						// next page
-						str.append(",\"nextPageToken\":");
-						if (info.hasNextPage())
-							str.append(encodeJSON(encodePage(info.getNextPage())));
-						else
-							str.append("null");
+						str.append(",\"nextPageToken\":").append(info.hasNextPage() ?
+								encodeJSON(encodePage(info.getNextPage())) : "null");
 
 						// items
 						encodeItems(str, info.getRelatedItems());
@@ -96,12 +94,9 @@ final class HTTPHandlerImpl implements HttpHandler {
 
 						ListExtractor.InfoItemsPage<InfoItem> info = SearchInfo.getMoreItems(service, handler, p);
 
-						// next page
-						str.append("\"nextPageToken\":");
-						if (info.hasNextPage())
-							str.append(encodeJSON(encodePage(info.getNextPage())));
-						else
-							str.append("null");
+						// next page token
+						str.append("\"nextPageToken\":").append(info.hasNextPage() ?
+								encodeJSON(encodePage(info.getNextPage())) : "null");
 
 						// items
 						encodeItems(str, info.getItems());
@@ -151,6 +146,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 					str.append(",\"viewCount\":").append(info.getViewCount());
 					str.append(",\"likeCount\":").append(info.getLikeCount());
 					str.append(",\"uploadDate\":").append(encodeJSON(info.getTextualUploadDate()));
+					str.append(",\"description\":").append(encodeJSON(info.getDescription().getContent()));
 
 					// tags
 					str.append(",\"tags\":[ ");
@@ -194,11 +190,6 @@ final class HTTPHandlerImpl implements HttpHandler {
 					str.append(",\"thumbnails\":");
 					encodeImages(str, info.getThumbnails());
 
-					// description
-					Description desc = info.getDescription();
-					if (desc != null)
-						str.append(",\"description\":").append(encodeJSON(desc.getContent()));
-
 					// audio streams
 					str.append(",\"audioStreams\":[ ");
 					for (AudioStream stream : info.getAudioStreams()) {
@@ -231,6 +222,10 @@ final class HTTPHandlerImpl implements HttpHandler {
 					for (InfoItem item : info.getRelatedItems()) {
 						if (item instanceof StreamInfoItem)
 							encodeStreamInfoItem(str, (StreamInfoItem) item);
+						else if (item instanceof ChannelInfoItem)
+							encodeChannelInfoItem(str, (ChannelInfoItem) item);
+						else if (item instanceof PlaylistInfoItem)
+							encodePlaylistInfoItem(str, (PlaylistInfoItem) item);
 						else
 							encodeInfoItem(str, item);
 					}
@@ -246,8 +241,160 @@ final class HTTPHandlerImpl implements HttpHandler {
 					sendResponse(exchange, 500, new String[]{"Content-Type=text/plain"}, Res.msg500);
 				}
 			}
+			case "/channel" -> {
+				Map<String, String> params = getSearchParams(uri.getRawQuery());
+				String svc = params.get("t");
+				String url = params.get("u");
+
+				if (url == null || url.isEmpty()) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
+				StreamingService service = getServiceById(svc);
+				if (service == null) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
+				try {
+					ChannelInfo info = ChannelInfo.getInfo(service, url);
+					StringBuilder str = new StringBuilder("{");
+
+					// basic info
+					str.append("\"id\":").append(encodeJSON(info.getId()));
+					str.append(",\"url\":").append(encodeJSON(info.getUrl()));
+					str.append(",\"name\":").append(encodeJSON(info.getName()));
+					str.append(",\"feed\":").append(encodeJSON(info.getFeedUrl()));
+					str.append(",\"service\":").append(info.getServiceId());
+					str.append(",\"verified\":").append(info.isVerified());
+					str.append(",\"subscribers\":").append(info.getSubscriberCount());
+					str.append(",\"description\":").append(encodeJSON(info.getDescription()));
+
+					// tags
+					str.append(",\"tags\":[ ");
+					for (String tag : info.getTags())
+						str.append(encodeJSON(tag)).append(",");
+					str.deleteCharAt(str.length() - 1).append("]");
+
+					// avatars
+					str.append(",\"avatars\":");
+					encodeImages(str, info.getAvatars());
+
+					// banners
+					str.append(",\"banners\":");
+					encodeImages(str, info.getBanners());
+
+					// parent channel
+					str.append(",\"parentChannel\":{\"url\":").append(encodeJSON(info.getParentChannelUrl()))
+							.append(",\"name\":").append(encodeJSON(info.getParentChannelName()))
+							.append("}");
+
+					byte[] data = str.append("}").toString().getBytes(StandardCharsets.UTF_8);
+					sendResponse(exchange, 200, new String[]{
+							"Content-Type=application/json",
+							"Content-Length=" + data.length
+					}, data);
+				} catch (Exception e) {
+					Console.error("Failed to parse channel info: ", e);
+					sendResponse(exchange, 500, new String[]{"Content-Type=text/plain"}, Res.msg500);
+				}
+			}
+			case "/playlist" -> {
+				Map<String, String> params = getSearchParams(uri.getRawQuery());
+				String svc = params.get("t");
+				String url = params.get("u");
+				String page = params.get("p");
+
+				if (url == null || url.isEmpty()) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
+				StreamingService service = getServiceById(svc);
+				if (service == null) {
+					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+					return;
+				}
+
+				try {
+					StringBuilder str = new StringBuilder("{");
+					if (page == null || page.isEmpty()) {
+						PlaylistInfo info = PlaylistInfo.getInfo(service, url);
+
+						// basic info
+						str.append("\"id\":").append(encodeJSON(info.getId()));
+						str.append(",\"url\":").append(encodeJSON(info.getUrl()));
+						str.append(",\"name\":").append(encodeJSON(info.getName()));
+						str.append(",\"sort\":").append(encodeJSON(info.getSortFilter()));
+						str.append(",\"streams\":").append(info.getStreamCount());
+						str.append(",\"service\":").append(info.getServiceId());
+						str.append(",\"description\":").append(encodeJSON(info.getDescription().getContent()));
+						str.append(",\"nextPageToken\":").append(info.hasNextPage() ?
+								encodeJSON(encodePage(info.getNextPage())) : "null");
+
+						// playlist
+						str.append(",\"playlist\":").append(switch (info.getPlaylistType()) {
+							case NORMAL -> "\"normal\"";
+							case MIX_GENRE -> "\"mix_genre\"";
+							case MIX_MUSIC -> "\"mix_music\"";
+							case MIX_STREAM -> "\"mix_stream\"";
+							case MIX_CHANNEL -> "\"mix_channel\"";
+						});
+
+						// banners
+						str.append(",\"banners\":");
+						encodeImages(str, info.getBanners());
+
+						// uploader
+						str.append(",\"uploader\":{\"url\":").append(encodeJSON(info.getUploaderUrl()))
+								.append(",\"name\":").append(encodeJSON(info.getUploaderName()))
+								.append("}");
+
+						// subchannel
+						str.append(",\"subchannel\":{\"url\":").append(encodeJSON(info.getSubChannelUrl()))
+								.append(",\"name\":").append(encodeJSON(info.getSubChannelName()))
+								.append("}");
+
+						// thumbnails
+						str.append(",\"thumbnails\":");
+						encodeImages(str, info.getThumbnails());
+
+						// related items
+						encodeItems(str, info.getRelatedItems());
+					} else {
+						Page p = decodePage(page);
+						if (p == null) {
+							sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+							return;
+						}
+
+						ListExtractor.InfoItemsPage<StreamInfoItem> info = PlaylistInfo.getMoreItems(service, url, p);
+
+						// next page token
+						str.append("\"nextPageToken\":").append(info.hasNextPage() ?
+								encodeJSON(encodePage(info.getNextPage())) : "null");
+
+						// items
+						encodeItems(str, info.getItems());
+					}
+
+					byte[] data = str.append("}").toString().getBytes(StandardCharsets.UTF_8);
+					sendResponse(exchange, 200, new String[]{
+							"Content-Type=application/json",
+							"Content-Length=" + data.length
+					}, data);
+				} catch (Exception e) {
+					Console.error("Failed to parse playlist info: ", e);
+					sendResponse(exchange, 500, new String[]{"Content-Type=text/plain"}, Res.msg500);
+				}
+			}
 			case "/trending" -> {
-				StreamingService service = getServiceById(getSearchParams(uri.getRawQuery()).get("t"));
+				Map<String, String> params = getSearchParams(uri.getRawQuery());
+				String svc = params.get("t");
+				String page = params.get("p");
+
+				StreamingService service = getServiceById(svc);
 				if (service == null) {
 					sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
 					return;
@@ -255,20 +402,40 @@ final class HTTPHandlerImpl implements HttpHandler {
 
 				try {
 					KioskExtractor<?> extractor = service.getKioskList().getDefaultKioskExtractor();
-					extractor.fetchPage();
-
-					KioskInfo info = KioskInfo.getInfo(extractor);
 					StringBuilder str = new StringBuilder("{");
 
-					// basic info
-					str.append("\"id\":").append(encodeJSON(info.getId()));
-					str.append(",\"url\":").append(encodeJSON(info.getUrl()));
-					str.append(",\"name\":").append(encodeJSON(info.getName()));
-					str.append(",\"sort\":").append(encodeJSON(info.getSortFilter()));
-					str.append(",\"service\":").append(info.getServiceId());
+					extractor.fetchPage();
 
-					// items
-					encodeItems(str, info.getRelatedItems());
+					if (page == null || page.isEmpty()) {
+						KioskInfo info = KioskInfo.getInfo(extractor);
+
+						// basic info
+						str.append("\"id\":").append(encodeJSON(info.getId()));
+						str.append(",\"url\":").append(encodeJSON(info.getUrl()));
+						str.append(",\"name\":").append(encodeJSON(info.getName()));
+						str.append(",\"sort\":").append(encodeJSON(info.getSortFilter()));
+						str.append(",\"service\":").append(info.getServiceId());
+						str.append(",\"nextPageToken\":").append(info.hasNextPage() ?
+								encodeJSON(encodePage(info.getNextPage())) : "null");
+
+						// items
+						encodeItems(str, info.getRelatedItems());
+					} else {
+						Page p = decodePage(page);
+						if (p == null) {
+							sendResponse(exchange, 400, new String[]{"Content-Type=text/plain"}, Res.msg400);
+							return;
+						}
+
+						ListExtractor.InfoItemsPage<?> info = extractor.getPage(p);
+
+						// next page token
+						str.append("\"nextPageToken\":").append(info.hasNextPage() ?
+								encodeJSON(encodePage(info.getNextPage())) : "null");
+
+						// items
+						encodeItems(str, info.getItems());
+					}
 
 					byte[] data = str.append("}").toString().getBytes(StandardCharsets.UTF_8);
 					sendResponse(exchange, 200, new String[]{
@@ -287,7 +454,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 		}
 	}
 
-	private static String encodeJSON(String str) {
+	private static String encodeJSON(@Nullable String str) {
 		if (str == null)
 			return "null";
 
@@ -360,6 +527,10 @@ final class HTTPHandlerImpl implements HttpHandler {
 		for (InfoItem item : items) {
 			if (item instanceof StreamInfoItem)
 				encodeStreamInfoItem(str, (StreamInfoItem) item);
+			else if (item instanceof ChannelInfoItem)
+				encodeChannelInfoItem(str, (ChannelInfoItem) item);
+			else if (item instanceof PlaylistInfoItem)
+				encodePlaylistInfoItem(str, (PlaylistInfoItem) item);
 			else
 				encodeInfoItem(str, item);
 		}
@@ -413,13 +584,51 @@ final class HTTPHandlerImpl implements HttpHandler {
 
 		str.append(",\"uploader\":{\"url\":").append(encodeJSON(item.getUploaderUrl()))
 				.append(",\"name\":").append(encodeJSON(item.getUploaderName()))
+				.append(",\"verified\":").append(item.isUploaderVerified())
 				.append("},\"thumbnails\":");
 
 		encodeImages(str, item.getThumbnails());
 		str.append("},");
 	}
 
-	private static void sendResponse(HttpExchange exchange, int status, String[] headers, byte[] data) throws IOException {
+	private static void encodeChannelInfoItem(StringBuilder str, ChannelInfoItem item) {
+		str.append("{\"url\":").append(encodeJSON(item.getUrl()))
+				.append(",\"name\":").append(encodeJSON(item.getName()))
+				.append(",\"type\":").append("\"channel\"")
+				.append(",\"streams\":").append(item.getStreamCount())
+				.append(",\"verified\":").append(item.isVerified())
+				.append(",\"subscribers\":").append(item.getSubscriberCount())
+				.append(",\"description\":").append(encodeJSON(item.getDescription()))
+				.append(",\"thumbnails\":");
+
+		encodeImages(str, item.getThumbnails());
+		str.append("},");
+	}
+
+	private static void encodePlaylistInfoItem(StringBuilder str, PlaylistInfoItem item) {
+		str.append("{\"url\":").append(encodeJSON(item.getUrl()))
+				.append(",\"name\":").append(encodeJSON(item.getName()))
+				.append(",\"type\":").append("\"playlist\"")
+				.append(",\"streams\":").append(item.getStreamCount())
+				.append(",\"playlist\":").append(switch (item.getPlaylistType()) {
+					case NORMAL -> "\"normal\"";
+					case MIX_GENRE -> "\"mix_genre\"";
+					case MIX_MUSIC -> "\"mix_music\"";
+					case MIX_STREAM -> "\"mix_stream\"";
+					case MIX_CHANNEL -> "\"mix_channel\"";
+				}).append(",\"description\":").append(encodeJSON(item.getDescription().getContent()));
+
+		str.append(",\"uploader\":{\"url\":").append(encodeJSON(item.getUploaderUrl()))
+				.append(",\"name\":").append(encodeJSON(item.getUploaderName()))
+				.append(",\"verified\":").append(item.isUploaderVerified())
+				.append("},\"thumbnails\":");
+
+		encodeImages(str, item.getThumbnails());
+		str.append("},");
+	}
+
+	private static void sendResponse(@NotNull HttpExchange exchange, int status, @NotNull String[] headers,
+	                                 byte[] data) throws IOException {
 		Map<String, List<String>> resHeaders = exchange.getResponseHeaders();
 		for (String header : headers) {
 			int i = header.indexOf('=', 1);
@@ -442,7 +651,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 		exchange.close();
 	}
 
-	private static StreamingService getServiceById(String id) {
+	private static StreamingService getServiceById(@Nullable String id) {
 		if (id == null || id.isEmpty())
 			return ServiceList.YouTube;
 
@@ -453,7 +662,7 @@ final class HTTPHandlerImpl implements HttpHandler {
 		}
 	}
 
-	private static Map<String, String> getSearchParams(String query) {
+	private static Map<String, String> getSearchParams(@Nullable String query) {
 		Map<String, String> params = new HashMap<>();
 		if (query == null || query.isEmpty())
 			return params;
